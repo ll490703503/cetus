@@ -18,14 +18,15 @@ void admin_select_conn_details(network_mysqld_con* con);
 void admin_select_all_backends(network_mysqld_con*);
 void admin_select_all_groups(network_mysqld_con* con);
 void admin_show_connectionlist(network_mysqld_con *admin_con, int show_count);
-void admin_show_allow_ip(network_mysqld_con *con, const char* module_name);
-void admin_add_allow_ip(network_mysqld_con *con, char *module, char *addr);
-void admin_delete_allow_ip(network_mysqld_con *con, char* module, char* ip);
+void admin_acl_show_rules(network_mysqld_con *con, gboolean is_white);
+void admin_acl_add_rule(network_mysqld_con *con, gboolean is_white, char *addr);
+void admin_acl_delete_rule(network_mysqld_con *con, gboolean is_white, char* ip);
 void admin_set_reduce_conns(network_mysqld_con* con, int mode);
 void admin_set_maintain(network_mysqld_con* con, int mode);
+void admin_set_charset_check(network_mysqld_con* con, int mode);
 void admin_show_maintain(network_mysqld_con* con);
-void admin_show_status(network_mysqld_con* con, const char* like);
 void admin_show_variables(network_mysqld_con* con, const char* like);
+void admin_set_server_conn_refresh(network_mysqld_con* con);
 void admin_select_version(network_mysqld_con* con);
 void admin_select_connection_stat(network_mysqld_con* con, int backend_ndx, char *user);
 void admin_select_user_password(network_mysqld_con* con, char* from_table, char *user);
@@ -57,4 +58,12 @@ void admin_show_databases(network_mysqld_con* con);
 void admin_create_single_table(network_mysqld_con*, const char* schema, const char* table,
                                const char* group);
 void admin_select_single_table(network_mysqld_con*);
+
+void admin_sql_log_start(network_mysqld_con* con);
+void admin_sql_log_stop(network_mysqld_con* con);
+void admin_sql_log_status(network_mysqld_con* con);
+void admin_kill_query(network_mysqld_con* con, guint32);
+void admin_comment_handle(network_mysqld_con* con);
+void admin_select_version_comment(network_mysqld_con* con);
+char* admin_get_value_by_key(network_mysqld_con* con, const char *key);
 #endif // ADMIN_COMMANDS_H

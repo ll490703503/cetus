@@ -61,8 +61,10 @@
 "user_pwd" return TK_USER_PWD;
 "app_user_pwd" return TK_APP_USER_PWD;
 "allow_ip" return TK_ALLOW_IP;
+"deny_ip" return TK_DENY_IP;
 "conn_details" return TK_CONN_DETAILS;
 "version" return TK_VERSION;
+"refresh_conns" return TK_REFRESH_CONNS;
 "get" return TK_GET;
 "user" return TK_USER;
 "password" return TK_PASSWORD;
@@ -75,6 +77,7 @@
 "master" return TK_MASTER;
 "slave" return TK_SLAVE;
 "maintain" return TK_MAINTAIN;
+"charset_check" return TK_CHARSET_CHECK;
 "status" return TK_STATUS;
 "variables" return TK_VARIABLES;
 "conn_num" return TK_CONN_NUM;
@@ -95,6 +98,18 @@
 "DATABASES" return TK_DATABASES;
 "SINGLE" return TK_SINGLE;
 "ON" return TK_ON;
+"SQL" return TK_SQL;
+"LOG" return TK_LOG;
+"START" return TK_START;
+"STOP" return TK_STOP;
+"KILL" return TK_KILL;
+"QUERY" return TK_QUERY;
+"REMOVE" return TK_REMOVE;
+"BACKEND" return TK_BACKEND;
+
+"@@" return TK_GLOBAL;
+"version_comment" return TK_VERSION_COMMENT;
+"limit" return TK_LIMIT;
 
 [0-9]+                 return TK_INTEGER; /*sign symbol is handled in parser*/
 
@@ -106,12 +121,12 @@
 \"([^"\\]|\"\"|\\.)*\"   return TK_STRING;
 `([^`]|``)*`   return TK_ID;
 
-"/*" { BEGIN(COMMENT); }
+"/*" { BEGIN(COMMENT); return TK_STARTCOM;}
 <COMMENT>[^*]*
 <COMMENT>"*"+[^*/]*
-<COMMENT>"*"+"/" { BEGIN(INITIAL); }
+<COMMENT>"*"+"/" { BEGIN(INITIAL); return TK_ENDCOM;}
 
 "#".*  { /* useless comment */ }
 "--"[ \t\n].*  { /* useless comment */ }
 
-.   {printf("### flex: bad input character: 0x%02x\n", yytext[0]);return 0;}
+.   {printf("### flex: bad input character: 0x%02x", yytext[0]);return 0;}

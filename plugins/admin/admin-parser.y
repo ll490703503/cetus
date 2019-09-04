@@ -122,7 +122,7 @@ opt_where_user(A) ::= WHERE USER EQ STRING(E). {A = token_strdup(E);}
 opt_where_user(A) ::= . {A = NULL;}
 
 %type equation {equation_t}
-equation(A) ::= ID(X) EQ STRING|ID|INTEGER|FLOAT(Y). {
+equation(A) ::= ID(X) EQ STRING|ID|INTEGER|FLOAT(Y)|ON. {
   A.left = X;
   A.right = Y;
 }
@@ -179,23 +179,30 @@ cmd ::= SELECT STAR FROM GROUPS SEMI. {
 cmd ::= SHOW CONNECTIONLIST opt_integer(X) SEMI. {
   admin_show_connectionlist(con, X);
 }
-cmd ::= SHOW ALLOW_IP ids(X) SEMI. {
-  char* module = token_strdup(X);
-  admin_show_allow_ip(con, module);
-  free(module);
+cmd ::= SHOW ALLOW_IP SEMI. {
+  admin_acl_show_rules(con, TRUE);
 }
-cmd ::= ADD ALLOW_IP ids(X) STRING(Y) SEMI. {
-  char* module = token_strdup(X);
+cmd ::= ADD ALLOW_IP STRING(Y) SEMI. {
   char* ip = token_strdup(Y);
-  admin_add_allow_ip(con, module, ip);
-  free(module);
+  admin_acl_add_rule(con, TRUE, ip);
   free(ip);
 }
-cmd ::= DELETE ALLOW_IP ids(X) STRING(Y) SEMI. {
-  char* module = token_strdup(X);
+cmd ::= DELETE ALLOW_IP STRING(Y) SEMI. {
   char* ip = token_strdup(Y);
-  admin_delete_allow_ip(con, module, ip);
-  free(module);
+  admin_acl_delete_rule(con, TRUE, ip);
+  free(ip);
+}
+cmd ::= SHOW DENY_IP SEMI. {
+  admin_acl_show_rules(con, FALSE);
+}
+cmd ::= ADD DENY_IP STRING(Y) SEMI. {
+  char* ip = token_strdup(Y);
+  admin_acl_add_rule(con, FALSE, ip);
+  free(ip);
+}
+cmd ::= DELETE DENY_IP STRING(Y) SEMI. {
+  char* ip = token_strdup(Y);
+  admin_acl_delete_rule(con, FALSE, ip);
   free(ip);
 }
 cmd ::= SET REDUCE_CONNS boolean(X) SEMI. {
@@ -204,12 +211,14 @@ cmd ::= SET REDUCE_CONNS boolean(X) SEMI. {
 cmd ::= SET MAINTAIN boolean(X) SEMI. {
   admin_set_maintain(con, X);
 }
+cmd ::= SET CHARSET_CHECK boolean(X) SEMI. {
+  admin_set_charset_check(con, X);
+}
+cmd ::= REFRESH_CONNS SEMI. {
+  admin_set_server_conn_refresh(con);
+}
 cmd ::= SHOW MAINTAIN STATUS SEMI. {
   admin_show_maintain(con);
-}
-cmd ::= SHOW STATUS opt_like(X) SEMI. {
-  admin_show_status(con, X);
-  if (X) free(X);
 }
 cmd ::= SHOW VARIABLES opt_like(X) SEMI. {
   admin_show_variables(con, X);
@@ -253,6 +262,7 @@ cmd ::= UPDATE BACKENDS SET equations(X) WHERE equation(Z) SEMI. {
   char* cond_val = token_strdup(Z.right);
   admin_update_backend(con, X, cond_key, cond_val);
   free(cond_key); free(cond_val);
+  g_list_free_full(X, free);
 }
 cmd ::= DELETE FROM BACKENDS WHERE equation(Z) SEMI. {
   char* key = token_strdup(Z.left);
@@ -291,6 +301,9 @@ cmd ::= CONFIG RELOAD SEMI. {
 }
 cmd ::= CONFIG RELOAD USER SEMI. {
   admin_config_reload(con, "user");
+}
+cmd ::= CONFIG RELOAD VARIABLES SEMI. {
+  admin_config_reload(con, "variables");
 }
 cmd ::= SAVE SETTINGS SEMI. {
   admin_save_settings(con);
@@ -448,4 +461,34 @@ cmd ::= CREATE SINGLE TABLE ids(X) DOT ids(Y) ON ids(Z) SEMI. {
 }
 cmd ::= SELECT SINGLE TABLE SEMI. {
   admin_select_single_table(con);
+}
+cmd ::= SQL LOG STATUS SEMI. {
+  admin_sql_log_status(con);
+}
+cmd ::= SQL LOG START SEMI. {
+  admin_sql_log_start(con);
+}
+cmd ::= SQL LOG STOP SEMI. {
+  admin_sql_log_stop(con);
+}
+cmd ::= KILL QUERY INTEGER(X) SEMI. {
+  admin_kill_query(con, token2int(X));
+}
+cmd ::= STARTCOM ENDCOM SEMI. {
+  admin_comment_handle(con);
+}
+cmd ::= SELECT GLOBAL VERSION_COMMENT LIMIT INTEGER SEMI. {
+  admin_select_version_comment(con);
+}
+cmd ::= REMOVE BACKEND INTEGER(X) SEMI. {
+  char* val = token_strdup(X);
+  admin_delete_backend(con, "backend_ndx", val);
+  free(val);
+}
+cmd ::=REMOVE BACKEND WHERE equation(Z) SEMI. {
+  char* key = token_strdup(Z.left);
+  char* val = token_strdup(Z.right);
+  admin_delete_backend(con, key, val);
+  free(key);
+  free(val);
 }

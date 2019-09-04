@@ -32,10 +32,9 @@ LINK_DIRECTORIES(${GLIB_LIBRARY_DIRS})
 INCLUDE_DIRECTORIES(${MYSQL_INCLUDE_DIRS})
 LINK_DIRECTORIES(${MYSQL_LIBRARY_DIRS})
 
-INCLUDE_DIRECTORIES(${EVENT_INCLUDE_DIRS})
-LINK_DIRECTORIES(${EVENT_LIBRARY_DIRS})
-
 LINK_DIRECTORIES(${LIBINTL_LIBRARY_DIRS})
+
+include_directories(${PROJECT_SOURCE_DIR}/libev)
 
 STRING(REPLACE "." "" SHARED_LIBRARY_SUFFIX ${CMAKE_SHARED_LIBRARY_SUFFIX})
 ADD_DEFINITIONS(-DSHARED_LIBRARY_SUFFIX="${SHARED_LIBRARY_SUFFIX}")
@@ -56,6 +55,7 @@ SET(chassis_sources
     chassis-unix-daemon.c
     chassis-config.c
     cJSON.c
+    chassis-sql-log.c
 )
 
 SET(timing_sources
@@ -78,6 +78,10 @@ SET(proxy_sources
     network-injection.c
     resultset_merge.c
     cetus-log.c
+    cetus-setaffinity.c
+    cetus-process.c
+    cetus-process-cycle.c
+    cetus-channel.c
     plugin-common.c
     network-backend.c
     sharding-config.c
@@ -90,15 +94,12 @@ SET(proxy_sources
     cetus-util.c
     cetus-variable.c
     cetus-monitor.c
+    cetus-acl.c
 )
 
 if (HAVE_OPENSSL)
   list(APPEND proxy_sources network-ssl.c)
 endif(HAVE_OPENSSL)
-
-if(NETWORK_DEBUG_TRACE_STATE_CHANGES)
-  list(APPEND proxy_sources cetus-query-queue.c)
-endif(NETWORK_DEBUG_TRACE_STATE_CHANGES)
 
 ADD_LIBRARY(mysql-chassis SHARED ${chassis_sources})
 ADD_LIBRARY(mysql-chassis-proxy SHARED ${proxy_sources})
@@ -132,8 +133,8 @@ if(HAVE_TCMALLOC)
         ${GLIB_LIBRARIES} 
         ${GMODULE_LIBRARIES} 
         ${GTHREAD_LIBRARIES} 
-        ${EVENT_LIBRARIES}
         ${MYSQL_LIBRARIES}
+        ev-cetus
         tcmalloc
         mysql-chassis-timing
         mysql-chassis-glibext
@@ -158,9 +159,9 @@ if(HAVE_TCMALLOC)
         ${GLIB_LIBRARIES}
         ${GMODULE_LIBRARIES}
         ${GTHREAD_LIBRARIES}
-        ${EVENT_LIBRARIES}
         ${MYSQL_LIBRARIES}
         ${ZLIB_LIBRARIES}
+        ev-cetus
         )
 
 else(HAVE_TCMALLOC)
@@ -181,8 +182,8 @@ else(HAVE_TCMALLOC)
     TARGET_LINK_LIBRARIES(mysql-chassis 
         ${GLIB_LIBRARIES} 
         ${GMODULE_LIBRARIES} 
-        ${GTHREAD_LIBRARIES} 
-        ${EVENT_LIBRARIES}
+        ${GTHREAD_LIBRARIES}
+        ev-cetus
         ${MYSQL_LIBRARIES}
         mysql-chassis-timing
         mysql-chassis-glibext
@@ -205,7 +206,7 @@ else(HAVE_TCMALLOC)
         ${GLIB_LIBRARIES}
         ${GMODULE_LIBRARIES}
         ${GTHREAD_LIBRARIES}
-        ${EVENT_LIBRARIES}
+        ev-cetus
         ${MYSQL_LIBRARIES}
         ${ZLIB_LIBRARIES}
         )

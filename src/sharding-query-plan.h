@@ -39,20 +39,20 @@ enum sharding_table_type_t {
 
 typedef struct sharding_plan_t {
     GPtrArray *groups;          /* GPtrArray<GString *> */
-
     GList *sql_list;            /* GList<GString *> */
-
     GList *mapping;             /* GList<struct _group_sql_pair *> */
-
-    gboolean is_modified;
     const GString *orig_sql;
     const GString *modified_sql;
     enum sharding_table_type_t table_type;
+    unsigned int is_partition_mode:1;
+    unsigned int is_modified:1;
+    unsigned int is_sql_rewrite_completely:1;
 } sharding_plan_t;
 
 sharding_plan_t *sharding_plan_new(const GString *orig_sql);
 
 void sharding_plan_free(sharding_plan_t *);
+void sharding_plan_free_map(sharding_plan_t *);
 
 void sharding_plan_set_modified_sql(sharding_plan_t *, GString *sql);
 

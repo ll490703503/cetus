@@ -42,10 +42,11 @@
 #include "sharding-config.h"
 
 #include <netdb.h>
+#include <arpa/inet.h>
 
-#define CHECK_ALIVE_INTERVAL 3
+#define CHECK_ALIVE_INTERVAL 1
 #define CHECK_ALIVE_TIMES 2
-#define CHECK_DELAY_INTERVAL 300 * 1000 /* 300ms */
+#define CHECK_DELAY_INTERVAL 100 * 1000 /* 100ms */
 
 #define ADDRESS_LEN 64
 
@@ -67,6 +68,8 @@ struct cetus_monitor_t {
 
     GList *registered_objects;
     char *config_id;
+
+    unsigned int mysql_init_called:1;
 };
 
 static void
@@ -105,6 +108,7 @@ get_mysql_connection(cetus_monitor_t *monitor, char *addr)
     }
 
     conn = mysql_init(NULL);
+    monitor->mysql_init_called = 1;
     if (!conn)
         return NULL;
 
@@ -181,7 +185,7 @@ group_replication_detect(network_backends_t *bs, cetus_monitor_t *monitor)
     backends_num = network_backends_count(bs);
     for (i = 0; i < backends_num; i++) {
         network_backend_t *backend = network_backends_get(bs, i);
-        if (backend->state == BACKEND_STATE_MAINTAINING)
+        if (backend->state == BACKEND_STATE_MAINTAINING || backend->state == BACKEND_STATE_DELETED)
             continue;
 
         char *backend_addr = backend->addr->name->str;
@@ -192,34 +196,36 @@ group_replication_detect(network_backends_t *bs, cetus_monitor_t *monitor)
         gchar old_master[ADDRESS_LEN] = {""};
 
         if(conn == NULL) {
-            g_debug("get connection failed. error: %d, text: %s, backend: %s",
+            g_message("get connection failed. error: %d, text: %s, backend: %s",
                                                                  mysql_errno(conn), mysql_error(conn), backend_addr);
             continue;
         }
 
         if(mysql_real_query(conn, L(sql1))) {
-            g_debug("select primary info failed for group_replication. error: %d, text: %s, backend: %s",
+            g_message("select primary info failed for group_replication. error: %d, text: %s, backend: %s",
                                            mysql_errno(conn), mysql_error(conn), backend_addr);
             continue;
         }
 
         rs_set = mysql_store_result(conn);
         if(rs_set == NULL) {
-            g_debug("get primary info result set failed for group_replication. error: %d, text: %s, backend: %s",
+            g_message("get primary info result set failed for group_replication. error: %d, text: %s, backend: %s",
                                                        mysql_errno(conn), mysql_error(conn), backend_addr);
             continue;
         }
 
         row = mysql_fetch_row(rs_set);
         if(row == NULL || row[0] == NULL || row[1] == NULL) {
-            g_debug("get primary info rows failed for group_replication. error: %d, text: %s, backend: %s",
-                                                                   mysql_errno(conn), mysql_error(conn), backend_addr);
+            if(backend->state != BACKEND_STATE_OFFLINE) {
+                g_message("get primary info rows failed for group_replication. error: %d, text: %s, backend: %s",
+                                                                                   mysql_errno(conn), mysql_error(conn), backend_addr);
+            }
             mysql_free_result(rs_set);
             continue;
         }
 
         if((get_ip_by_name(row[0], ip) != 0) || ip[0] == '\0') {
-            g_debug("get master ip by name failed. error: %d, text: %s, backend: %s",
+            g_message("get master ip by name failed. error: %d, text: %s, backend: %s",
                                                                    mysql_errno(conn), mysql_error(conn), backend_addr);
             mysql_free_result(rs_set);
             continue;
@@ -241,7 +247,7 @@ group_replication_detect(network_backends_t *bs, cetus_monitor_t *monitor)
         rs_set = NULL;
 
         if(master_addr[0] == '\0') {
-            g_debug("get master address failed. error: %d, text: %s, backend: %s",
+            g_message("get master address failed. error: %d, text: %s, backend: %s",
                                                                    mysql_errno(conn), mysql_error(conn), backend_addr);
             continue;
         }
@@ -249,30 +255,29 @@ group_replication_detect(network_backends_t *bs, cetus_monitor_t *monitor)
         if(strcasecmp(backend_addr, master_addr)) {
             conn = get_mysql_connection(monitor, master_addr);
             if(conn == NULL) {
-                g_debug("get connection failed. error: %d, text: %s, backend: %s",
+                g_message("get connection failed. error: %d, text: %s, backend: %s",
                                                                     mysql_errno(conn), mysql_error(conn), master_addr);
                 continue;
             }
         }
 
         if(mysql_real_query(conn, L(sql2))) {
-            g_debug("select slave info failed for group_replication. error: %d, text: %s, backend: %s",
+            g_message("select slave info failed for group_replication. error: %d, text: %s, backend: %s",
                                            mysql_errno(conn), mysql_error(conn), master_addr);
             continue;
         }
 
         rs_set = mysql_store_result(conn);
         if(rs_set == NULL) {
-            g_debug("get slave info result set failed for group_replication. error: %d, text: %s",
+            g_message("get slave info result set failed for group_replication. error: %d, text: %s",
                                                        mysql_errno(conn), mysql_error(conn));
             continue;
         }
         while(row=mysql_fetch_row(rs_set)) {
             memset(ip, 0, ADDRESS_LEN);
             if((get_ip_by_name(row[0], ip) != 0) || ip[0] == '\0') {
-                g_debug("get slave ip by name failed. error: %d, text: %s",
+                g_message("get slave ip by name failed. error: %d, text: %s",
                                                        mysql_errno(conn), mysql_error(conn));
-                mysql_free_result(rs_set);
                 continue;
             }
             memset(slave_addr, 0, ADDRESS_LEN);
@@ -281,7 +286,7 @@ group_replication_detect(network_backends_t *bs, cetus_monitor_t *monitor)
                 slave_list = g_list_append(slave_list, strdup(slave_addr));
                 g_debug("add slave %s in list, %d", slave_addr, g_list_length(slave_list));
             } else {
-                g_debug("get slave address failed. error: %d, text: %s",
+                g_message("get slave address failed. error: %d, text: %s",
                                                        mysql_errno(conn), mysql_error(conn));
             }
         }
@@ -300,14 +305,14 @@ group_replication_detect(network_backends_t *bs, cetus_monitor_t *monitor)
         if(backend->type == BACKEND_TYPE_RW) {
             has_master++;
             if(!strcasecmp(backend_addr, master_addr)) {
-                if(backend->state != BACKEND_STATE_UP) {
-                    network_backends_modify(bs, i, BACKEND_TYPE_RW, BACKEND_STATE_UP, NO_PREVIOUS_STATE);
+                if(backend->state == BACKEND_STATE_OFFLINE) {
+                    network_backends_modify(bs, i, BACKEND_TYPE_RW, BACKEND_STATE_UNKNOWN, NO_PREVIOUS_STATE);
                 }
                 break;
             }
             GList *it = g_list_find_custom(slave_list, backend_addr, slave_list_compare);
             if(it) {
-                if(backend->state == BACKEND_STATE_DELETED || backend->state == BACKEND_STATE_MAINTAINING) {
+                if(backend->state == BACKEND_STATE_OFFLINE) {
                     network_backends_modify(bs, i, BACKEND_TYPE_RO, BACKEND_STATE_UNKNOWN, NO_PREVIOUS_STATE);
                 } else {
                     network_backends_modify(bs, i, BACKEND_TYPE_RO, backend->state, NO_PREVIOUS_STATE);
@@ -316,7 +321,9 @@ group_replication_detect(network_backends_t *bs, cetus_monitor_t *monitor)
                 g_free(it->data);
                 g_list_free(it);
             } else {
-                network_backends_modify(bs, i, BACKEND_TYPE_RO, BACKEND_STATE_DELETED, NO_PREVIOUS_STATE);
+                if(backend->state != BACKEND_STATE_MAINTAINING && backend->state != BACKEND_STATE_DELETED) {
+                    network_backends_modify(bs, i, BACKEND_TYPE_RO, BACKEND_STATE_OFFLINE, NO_PREVIOUS_STATE);
+                }
             }
             break;
         }
@@ -334,19 +341,25 @@ group_replication_detect(network_backends_t *bs, cetus_monitor_t *monitor)
         if(backend->type == BACKEND_TYPE_RO || backend->type == BACKEND_TYPE_UNKNOWN) {
             GList *it = g_list_find_custom(slave_list, backend_addr, slave_list_compare);
             if(it) {
-                if(backend->state == BACKEND_STATE_DELETED || backend->state == BACKEND_STATE_MAINTAINING) {
+                if(backend->state == BACKEND_STATE_OFFLINE) {
                     network_backends_modify(bs, i, BACKEND_TYPE_RO, BACKEND_STATE_UNKNOWN, NO_PREVIOUS_STATE);
+                } else {
+                    network_backends_modify(bs, i, BACKEND_TYPE_RO, backend->state, NO_PREVIOUS_STATE);
                 }
                 slave_list = g_list_remove_link(slave_list, it);
                 g_free(it->data);
                 g_list_free(it);
             } else {
                 if(master_addr[0] != '\0' && !strcasecmp(backend_addr, master_addr)) {
-                    network_backends_modify(bs, i, BACKEND_TYPE_RW, BACKEND_STATE_UP, NO_PREVIOUS_STATE);
+                    if(backend->state == BACKEND_STATE_OFFLINE) {
+                        network_backends_modify(bs, i, BACKEND_TYPE_RW, BACKEND_STATE_UNKNOWN, NO_PREVIOUS_STATE);
+                    } else {
+                        network_backends_modify(bs, i, BACKEND_TYPE_RW, backend->state, NO_PREVIOUS_STATE);
+                    }
                     has_master++;
                 } else {
-                    if(backend->type != BACKEND_TYPE_RO || backend->state != BACKEND_STATE_DELETED) {
-                        network_backends_modify(bs, i, BACKEND_TYPE_RO, BACKEND_STATE_DELETED, NO_PREVIOUS_STATE);
+                    if(backend->state != BACKEND_STATE_MAINTAINING && backend->state != BACKEND_STATE_DELETED) {
+                        network_backends_modify(bs, i, BACKEND_TYPE_RO, BACKEND_STATE_OFFLINE, NO_PREVIOUS_STATE);
                     }
                 }
             }
@@ -380,9 +393,29 @@ group_replication_detect(network_backends_t *bs, cetus_monitor_t *monitor)
 }
 
 #define ADD_MONITOR_TIMER(ev_struct, ev_cb, timeout) \
+    ev_now_update((struct ev_loop *) monitor->evloop);\
     evtimer_set(&(monitor->ev_struct), ev_cb, monitor);\
     event_base_set(monitor->evloop, &(monitor->ev_struct));\
     evtimer_add(&(monitor->ev_struct), &timeout);
+
+gint
+check_hostname(network_backend_t *backend)
+{
+     gint ret = 0;
+     if (!backend) return ret;
+
+     gchar old_addr[INET_ADDRSTRLEN] = {""};
+     inet_ntop(AF_INET, &(backend->addr->addr.ipv4.sin_addr), old_addr, sizeof(old_addr));
+     if (0 != network_address_set_address(backend->addr, backend->address->str)) {
+         return ret;
+     }
+     char new_addr[INET_ADDRSTRLEN] = {""};
+     inet_ntop(AF_INET, &(backend->addr->addr.ipv4.sin_addr), new_addr, sizeof(new_addr));
+     if (strcmp (old_addr, new_addr) != 0) {
+         ret = 1;
+     }
+     return ret;
+ }
 
 static void
 check_backend_alive(int fd, short what, void *arg)
@@ -397,16 +430,18 @@ check_backend_alive(int fd, short what, void *arg)
         group_replication_detect(bs, monitor);
     }
 
-    for (i = 0; i < network_backends_count(bs); i++) {
+    int backends_num = network_backends_count(bs);
+    for (i = 0; i < backends_num; i++) {
         network_backend_t *backend = network_backends_get(bs, i);
         backend_state_t oldstate = backend->state;
         gint ret = 0;
-        if (backend->state == BACKEND_STATE_DELETED || backend->state == BACKEND_STATE_MAINTAINING)
+        if (backend->state == BACKEND_STATE_DELETED || backend->state == BACKEND_STATE_MAINTAINING || backend->state == BACKEND_STATE_OFFLINE)
             continue;
 
         char *backend_addr = backend->addr->name->str;
         int check_count = 0;
         MYSQL *conn = NULL;
+hostnameloop:
         while (++check_count <= CHECK_ALIVE_TIMES) {
             conn = get_mysql_connection(monitor, backend_addr);
             if (conn)
@@ -414,6 +449,11 @@ check_backend_alive(int fd, short what, void *arg)
         }
 
         if (conn == NULL) {
+            if (chas->check_dns) {
+                if (check_hostname(backend)) {
+                    goto hostnameloop;
+                }
+            }
             if (backend->state != BACKEND_STATE_DOWN) {
                 if (backend->type != BACKEND_TYPE_RW) {
                     ret = network_backends_modify(bs, i, backend->type, BACKEND_STATE_DOWN, oldstate);
@@ -461,17 +501,18 @@ update_master_timestamp(int fd, short what, void *arg)
 
     /* Catch RW time 
      * Need a table to write from master and read from slave.
-     * CREATE TABLE `tb_heartbeat` (
+     * CREATE TABLE if not exists `tb_heartbeat` (
      *   `p_id` varchar(128) NOT NULL,
      *   `p_ts` timestamp(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
      *   PRIMARY KEY (`p_id`)
      * ) ENGINE = InnoDB DEFAULT CHARSET = utf8;
      */
-    for (i = 0; i < network_backends_count(bs); i++) {
+    int backends_num = network_backends_count(bs);
+    for (i = 0; i < backends_num; i++) {
         network_backend_t *backend = network_backends_get(bs, i);
         backend_state_t oldstate = backend->state;
         gint ret = 0;
-        if (backend->state == BACKEND_STATE_DELETED || backend->state == BACKEND_STATE_MAINTAINING)
+        if (backend->state == BACKEND_STATE_DELETED || backend->state == BACKEND_STATE_MAINTAINING || backend->state == BACKEND_STATE_OFFLINE)
             continue;
 
         if (backend->type == BACKEND_TYPE_RW) {
@@ -482,8 +523,14 @@ update_master_timestamp(int fd, short what, void *arg)
                      HEARTBEAT_DB, monitor->config_id, cur_time_str, cur_time_str);
 
             char *backend_addr = backend->addr->name->str;
+hostnameloop:;
             MYSQL *conn = get_mysql_connection(monitor, backend_addr);
             if (conn == NULL) {
+                if (chas->check_dns) {
+                    if (check_hostname(backend)) {
+                        goto hostnameloop;
+                    }
+                }   
                 g_critical("Could not connect to Backend %s.", backend_addr);
             } else {
                 if (backend->state != BACKEND_STATE_UP) {
@@ -510,7 +557,7 @@ update_master_timestamp(int fd, short what, void *arg)
 
     /* Wait 50ms for RO write data */
     struct timeval timeout = { 0 };
-    timeout.tv_usec = 50 * 1000;
+    timeout.tv_usec = 10 * 1000;
     ADD_MONITOR_TIMER(read_slave_timer, check_slave_timestamp, timeout);
 }
 
@@ -523,17 +570,25 @@ check_slave_timestamp(int fd, short what, void *arg)
     network_backends_t *bs = chas->priv->backends;
 
     /* Read delay sec and set slave UP/DOWN according to delay_secs */
-    for (i = 0; i < network_backends_count(bs); i++) {
+
+    int backends_num = network_backends_count(bs);
+    for (i = 0; i < backends_num; i++) {
         network_backend_t *backend = network_backends_get(bs, i);
         backend_state_t oldstate = backend->state;
         gint ret = 0;
         if (backend->type == BACKEND_TYPE_RW || backend->state == BACKEND_STATE_DELETED ||
-            backend->state == BACKEND_STATE_MAINTAINING)
+            backend->state == BACKEND_STATE_MAINTAINING || backend->state == BACKEND_STATE_OFFLINE)
             continue;
 
         char *backend_addr = backend->addr->name->str;
+hostnameloop:;
         MYSQL *conn = get_mysql_connection(monitor, backend_addr);
         if (conn == NULL) {
+            if (chas->check_dns) {
+                if (check_hostname(backend)) {
+                    goto hostnameloop;
+                }
+            }
             g_critical("Connection error when read delay from RO backend: %s", backend_addr);
             if (backend->state != BACKEND_STATE_DOWN) {
                 ret = network_backends_modify(bs, i, backend->type, BACKEND_STATE_DOWN, oldstate);
@@ -560,6 +615,9 @@ check_slave_timestamp(int fd, short what, void *arg)
         previous_result[i] = result;
         if (result == 0) {
             MYSQL_RES *rs_set = mysql_store_result(conn);
+            if(!rs_set) {
+                g_warning("fetch heartbeat result failed, errno:%d, errmsg:%s", mysql_errno(conn), mysql_error(conn));
+            }
             MYSQL_ROW row = mysql_fetch_row(rs_set);
             double ts_slave = 0;
             if (row != NULL) {
@@ -615,61 +673,22 @@ struct monitored_object_t {
     void *arg;
 };
 
-struct event config_reload_timer;
-
-static void
-check_config_worker(int fd, short what, void *arg)
-{
-    cetus_monitor_t *monitor = arg;
-    chassis *chas = monitor->chas;
-    chassis_config_t *conf = chas->config_manager;
-    struct timeval timeout = { 0 };
-    GList *l;
-
-    for (l = monitor->registered_objects; l; l = l->next) {
-        struct monitored_object_t *ob = l->data;
-        if (chassis_config_is_object_outdated(conf, ob->name)) {
-            /* if (evtimer_pending(&config_reload_timer, NULL))
-               break; */
-            g_message("monitor: object `%s` is outdated, try updating...", ob->name);
-
-            /* first read in object from remote in monitor thread */
-            chassis_config_update_object_cache(conf, ob->name);
-
-            /* then switch to main thread */
-            evtimer_set(&config_reload_timer, ob->func, ob->arg);
-            event_base_set(chas->event_base, &config_reload_timer);
-            evtimer_add(&config_reload_timer, &timeout);
-            break;              /* TODO: for now, only update one object each time */
-        }
-    }
-
-    timeout.tv_sec = 5;
-    ADD_MONITOR_TIMER(check_config_timer, check_config_worker, timeout);
-}
-
 void
 cetus_monitor_open(cetus_monitor_t *monitor, monitor_type_t monitor_type)
 {
     struct timeval timeout;
     switch (monitor_type) {
     case MONITOR_TYPE_CHECK_ALIVE:
-        timeout.tv_sec = CHECK_ALIVE_INTERVAL;
-        timeout.tv_usec = 0;
+        timeout.tv_sec = 0;
+        timeout.tv_usec = 1000;
         ADD_MONITOR_TIMER(check_alive_timer, check_backend_alive, timeout);
         g_message("check_alive monitor open.");
         break;
     case MONITOR_TYPE_CHECK_DELAY:
         timeout.tv_sec = 0;
-        timeout.tv_usec = CHECK_DELAY_INTERVAL;
+        timeout.tv_usec = 1000;
         ADD_MONITOR_TIMER(write_master_timer, update_master_timestamp, timeout);
         g_message("check_slave monitor open.");
-        break;
-    case MONITOR_TYPE_CHECK_CONFIG:
-        timeout.tv_sec = 5;
-        timeout.tv_usec = 0;
-        ADD_MONITOR_TIMER(check_config_timer, check_config_worker, timeout);
-        g_message("check_config monitor open.");
         break;
     default:
         break;
@@ -705,14 +724,15 @@ cetus_monitor_mainloop(void *data)
     if (chas->check_slave_delay) {
         cetus_monitor_open(monitor, MONITOR_TYPE_CHECK_DELAY);
     }
-#if 0
-    cetus_monitor_open(monitor, MONITOR_TYPE_CHECK_CONFIG);
-#endif
-    chassis_event_loop(loop);
+    chassis_event_loop(loop, NULL);
 
     g_message("monitor thread closing %d mysql conns", g_hash_table_size(monitor->backend_conns));
     g_hash_table_destroy(monitor->backend_conns);
-    mysql_thread_end();
+
+    if (monitor->mysql_init_called) {
+        mysql_thread_end();
+        g_message("%s:mysql_thread_end is called", G_STRLOC);
+    }
 
     g_debug("exiting monitor loop");
     chassis_event_loop_free(loop);
@@ -736,6 +756,7 @@ cetus_monitor_start_thread(cetus_monitor_t *monitor, chassis *chas)
     new_thread = g_thread_create(cetus_monitor_mainloop, monitor, TRUE, &error);
     if (new_thread == NULL && error != NULL) {
         g_critical("Create thread error: %s", error->message);
+        g_clear_error(&error);
     }
 #else
     new_thread = g_thread_new("monitor-thread", cetus_monitor_mainloop, monitor);
@@ -778,23 +799,3 @@ cetus_monitor_free(cetus_monitor_t *monitor)
     g_free(monitor);
 }
 
-void
-cetus_monitor_register_object(cetus_monitor_t *monitor, const char *name, monitor_callback_fn func, void *arg)
-{
-    GList *l;
-    struct monitored_object_t *object = NULL;
-    for (l = monitor->registered_objects; l; l = l->next) {
-        struct monitored_object_t *ob = l->data;
-        if (strcmp(ob->name, name) == 0) {
-            object = ob;
-            break;
-        }
-    }
-    if (!object) {
-        object = g_new0(struct monitored_object_t, 1);
-        strncpy(object->name, name, MON_MAX_NAME_LEN - 1);
-        monitor->registered_objects = g_list_append(monitor->registered_objects, object);
-    }
-    object->func = func;
-    object->arg = arg;
-}

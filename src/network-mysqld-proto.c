@@ -639,12 +639,10 @@ void
 network_mysqld_proto_fielddefs_free(GPtrArray *fields)
 {
     guint i;
-
     for (i = 0; i < fields->len; i++) {
         MYSQL_FIELD *field = fields->pdata[i];
-
         if (field)
-            network_mysqld_proto_fielddef_free(field);
+            g_free(field);
     }
 
     g_ptr_array_free(fields, TRUE);
@@ -732,7 +730,7 @@ network_mysqld_proto_get_packet_len(GString *_header)
 {
     unsigned char *header = (unsigned char *)_header->str;
 
-    return header[0] | header[1] << 8 | header[2] << 16;
+    return (header[0]) | (header[1] << 8) | (header[2] << 16);
 }
 
 /**

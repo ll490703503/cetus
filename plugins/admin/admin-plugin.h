@@ -4,6 +4,7 @@
 #include "glib-ext.h"
 #include "network-mysqld.h"
 #include "admin-stats.h"
+#include "cetus-process.h"
 
 #ifndef PLUGIN_VERSION
 #ifdef CHASSIS_BUILD_TAG
@@ -21,10 +22,8 @@ struct chassis_plugin_config {
     gchar *admin_password;        /**< login password */
 
     gchar *allow_ip;                  /**< allow ip addr list */
-    GHashTable *allow_ip_table;
 
     gchar *deny_ip;                  /**< deny ip addr list */
-    GHashTable *deny_ip_table;
 
     gboolean has_shard_plugin;
 
@@ -32,6 +31,5 @@ struct chassis_plugin_config {
 
     admin_stats_t *admin_stats;
 };
-
 
 #endif

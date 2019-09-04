@@ -49,7 +49,7 @@ MySQL和Cetus可以部署在同一台服务器上，也可以部署在各自独�
 Cetus可以利用bin/cetus启动
 
 ```
-bin/cetus --defaults-file=conf/shard.conf [--conf-dir＝/home/user/cetus_install/conf/]
+bin/cetus --defaults-file=conf/shard.conf [--conf-dir=/home/user/cetus_install/conf/]
 ```
 
 ​其中Cetus启动时可以添加命令行选项，--defaults-file选项用来加载启动配置文件，且在启动前保证启动配置文件的权限为660；--conf-dir是可选项，用来加载其他配置文件(.json文件)，默认为当前目录下conf文件夹。
@@ -261,7 +261,7 @@ Cetus sharding版能支持大多数的SQL语句，目前限制支持的功能有
 
 **10.不支持lock tables语法**
 
-**11.多个聚合函数情况下，不支持having条件**
+**11.多个聚合函数情况下，不支持having条件，也不支持聚合函数之间乘除法**
 
 **限制支持项：**
 
@@ -341,7 +341,7 @@ Sharding版支持的key类型：table|group|mode|transaction，支持的value包
 
   SQL: select /\*# table=employee key=123\*/emp_no,emp_name from employee;
 
-  说明：查询表employee中分区键的值是123的记录。
+  说明：将SQL路由到key=123所在的分片上执行。
 
 **2.Key类型为group的用法**
 
@@ -373,7 +373,7 @@ Sharding版支持的key类型：table|group|mode|transaction，支持的value包
 
   SQL: select /\*# table=employee key=123\*/ /\*#mode=readwrite\*/ emp_no,emp_name from employee;
 
-  说明：查询表employee中分区键的值是123的记录，且强制从主库读取。
+  说明：将SQL路由到key=123所在的分片上执行，且强制从该分片的主库读取。
 
   注意：table、group这两个key是互斥的，即table或者group分别可以和mode/transaction共用，但它俩不能同时出现，否则会返回错误。另外，请将注释部分写到第一个关键字之后。注释一旦使用，其优先级高于后续where条件（如果有的话）中的分区路由信息。
 

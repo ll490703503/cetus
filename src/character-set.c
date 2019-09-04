@@ -23,8 +23,6 @@
 #include <string.h>
 #include <assert.h>
 
-#define DEFAULT_CHARSET   '\x21'
-
 int
 charset_get_number(const char *name)
 {
@@ -46,7 +44,7 @@ charset_get_number(const char *name)
     int map_len = sizeof(map) / sizeof(struct _charset_number_t);
     int i = 0;
     while (i < map_len) {
-        if (strcmp(name, map[i].name) == 0) {
+        if (strcasecmp(name, map[i].name) == 0) {
             return map[i].number;
         }
         ++i;
